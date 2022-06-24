@@ -4,6 +4,7 @@ pub enum SkynetError {
   NotFile,
   NotDirectory,
   TextNonceError(String),
+  CustomError(String),
   WriteError(std::io::Error),
   FileError(std::io::Error),
   TUSError(tus_async_client::Error),

@@ -3,11 +3,15 @@ use std::{
   collections::HashMap,
   fs,
   path::Path,
+  io::Write,
   str,
 };
 use hyper::{body, Body, Request};
 use mime::Mime;
 use serde_json::Value as Json;
+use futures::{Stream, StreamExt};
+
+pub type BytesDownloaded = u64;
 
 #[derive(Debug)]
 pub struct DownloadOptions {
@@ -100,6 +104,80 @@ pub async fn download_file<P: AsRef<Path>>(
   fs::write(path, data).map_err(FileError)?;
 
   Ok(())
+}
+
+pub fn download_file_stream<P: AsRef<Path>>(
+  client: &SkynetClient,
+  path: P,
+  skylink: &str,
+  opt: DownloadOptions,
+) -> impl Stream<Item = SkynetResult<BytesDownloaded>> {
+  let skylink = if skylink.starts_with(URI_SKYNET_PREFIX) {
+    &skylink[URI_SKYNET_PREFIX.len()..]
+  } else {
+    skylink
+  };
+
+  let uri = make_uri(
+    client.get_portal_url(),
+    opt.endpoint_path.clone(),
+    opt.api_key.clone(),
+    Some(skylink.to_string()),
+    Default::default()); // todo: query
+
+  // https://gist.github.com/giuliano-oliveira/4d11d6b3bb003dba3a1b53f43d81b30d
+  async_stream::stream! {
+
+    // Reqwest setup
+    // TODO: use the hyper instance embedded in the Client instead
+    let res = reqwest::Client::new()
+        .get(&uri.to_string())
+        .header("Skynet-API-key", opt.api_key.unwrap_or_default())
+        .send()
+        .await
+        .map_err(ReqwestError);
+
+    if res.is_err() {
+        yield res.map(|_| 0)
+    }
+
+    else {
+        let res = res.unwrap();
+
+        let total_size = res
+            .content_length()
+            .ok_or(CustomError(format!("Failed to get content length from '{}'", &uri)))
+            .unwrap();
+
+        // download chunks
+        let mut file = fs::File::create(&path)
+            .map_err(FileError)
+            .unwrap();
+
+        let mut downloaded: u64 = 0;
+        let mut stream = res.bytes_stream();
+        let mut cont = true;
+
+        while let Some(item) = stream.next().await {
+            // todo: do not replace original error
+            let chunk = item.or(Err(CustomError(format!("Error while downloading file")))).unwrap();
+
+            file
+                .write_all(&chunk)
+                .map_err(FileError)
+                .unwrap();
+
+            let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
+            let since_last = new - downloaded;
+
+            downloaded = new;
+
+            yield Ok(downloaded)
+        }
+
+        // todo: yield error if expected file size doesnt match?
+    }
+  }
 }
 
 #[derive(Debug, PartialEq)]
@@ -235,6 +313,35 @@ mod tests {
     assert!(res.is_ok());
     assert_eq!(fs::read_to_string("tmp2.txt").unwrap(), "hello world");
     fs::remove_file("tmp2.txt").unwrap();
+  }
+
+  #[tokio::test]
+  async fn test_download_file_stream() {
+    let client = SkynetClient::default();
+    let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
+    let res = download_file(&client, "tmp2.txt", skylink, DownloadOptions::default()).await;
+    println!("{:?}", res);
+    assert!(res.is_ok());
+    assert_eq!(fs::read_to_string("tmp2.txt").unwrap(), "hello world");
+    fs::remove_file("tmp2.txt").unwrap();
+  }
+
+  #[tokio::test]
+  async fn stream_download() {
+    let client = SkynetClient::default();
+    let skylink = "AABC5fIelZsChCGs-fSBRVc5n2BoHc-LAmehPlPRBjIV9w";
+    let mut output_event_stream = download_file_stream(&client, "/tmp/tmp2.txt", skylink, DownloadOptions::default());
+
+    futures_util::pin_mut!(output_event_stream);
+
+    while let Some(output_event) = output_event_stream.next().await.transpose().expect("stream error") {
+      dbg!(&output_event);
+    }
+
+    // todo check file size
+    // assert_eq!();
+
+    fs::remove_file("/tmp/tmp2.txt").unwrap();
   }
 
   #[tokio::test]

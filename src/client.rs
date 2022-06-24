@@ -6,9 +6,11 @@ use crate::{
   util::DEFAULT_PORTAL_URL,
 };
 use std::{collections::HashMap, path::Path};
+use futures::Stream;
 use hyper::{client::HttpConnector, Client};
 use hyper_tls::HttpsConnector;
 use mime::Mime;
+use crate::download::BytesDownloaded;
 
 #[derive(Debug)]
 pub struct SkynetClientOptions {
@@ -91,6 +93,15 @@ impl SkynetClient {
     opt: DownloadOptions,
   ) -> SkynetResult<()> {
     download::download_file(self, path, skylink, opt).await
+  }
+
+  pub fn download_file_stream<P: AsRef<Path>>(
+    &self,
+    path: P,
+    skylink: &str,
+    opt: DownloadOptions,
+  ) -> impl Stream<Item = SkynetResult<BytesDownloaded>> {
+    download::download_file_stream(self, path, skylink, opt)
   }
 
   pub async fn get_metadata(
