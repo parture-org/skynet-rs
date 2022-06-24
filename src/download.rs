@@ -118,12 +118,19 @@ pub fn download_file_stream<P: AsRef<Path>>(
     skylink
   };
 
+  // log::debug!("skylink to download stream: {}", skylink);
+
   let uri = make_uri(
     client.get_portal_url(),
     opt.endpoint_path.clone(),
     opt.api_key.clone(),
     Some(skylink.to_string()),
     Default::default()); // todo: query
+
+  // log::debug!("URI to download stream: {}", uri.to_string());
+
+  // todo: create Client:: or util:: function for this
+  let api_key = opt.api_key.or(client.get_options().api_key.clone()).unwrap_or_default();
 
   // https://gist.github.com/giuliano-oliveira/4d11d6b3bb003dba3a1b53f43d81b30d
   async_stream::stream! {
@@ -132,7 +139,7 @@ pub fn download_file_stream<P: AsRef<Path>>(
     // TODO: use the hyper instance embedded in the Client instead
     let res = reqwest::Client::new()
         .get(&uri.to_string())
-        .header("Skynet-API-key", opt.api_key.unwrap_or_default())
+        .header("Skynet-API-key", api_key)
         .send()
         .await
         .map_err(ReqwestError);
