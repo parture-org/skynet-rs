@@ -318,17 +318,6 @@ mod tests {
   #[tokio::test]
   async fn test_download_file_stream() {
     let client = SkynetClient::default();
-    let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
-    let res = download_file(&client, "tmp2.txt", skylink, DownloadOptions::default()).await;
-    println!("{:?}", res);
-    assert!(res.is_ok());
-    assert_eq!(fs::read_to_string("tmp2.txt").unwrap(), "hello world");
-    fs::remove_file("tmp2.txt").unwrap();
-  }
-
-  #[tokio::test]
-  async fn stream_download() {
-    let client = SkynetClient::default();
     let skylink = "AABC5fIelZsChCGs-fSBRVc5n2BoHc-LAmehPlPRBjIV9w";
     let mut output_event_stream = download_file_stream(&client, "/tmp/tmp2.txt", skylink, DownloadOptions::default());
 
