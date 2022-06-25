@@ -340,6 +340,24 @@ mod tests {
   }
 
   #[tokio::test]
+  async fn test_download_file_stream_auth() {
+    let client = SkynetClient::new_from_env();
+    let skylink = "AABC5fIelZsChCGs-fSBRVc5n2BoHc-LAmehPlPRBjIV9w";
+    let mut output_event_stream = download_file_stream(&client, "/tmp/tmp2.txt", skylink, DownloadOptions::default());
+
+    futures_util::pin_mut!(output_event_stream);
+
+    while let Some(output_event) = output_event_stream.next().await.transpose().expect("stream error") {
+      dbg!(&output_event);
+    }
+
+    // todo check file size
+    // assert_eq!();
+
+    fs::remove_file("/tmp/tmp2.txt").unwrap();
+  }
+
+  #[tokio::test]
   async fn test_get_metadata() {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";

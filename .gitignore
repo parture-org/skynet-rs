@@ -1,2 +1,4 @@
 /target
 Cargo.lock
+.skynet.env
+/.skynet.env

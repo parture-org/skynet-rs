@@ -46,6 +46,25 @@ impl SkynetClient {
     }
   }
 
+  pub fn new_from_env() -> Self {
+    let mut env_variables
+        = env_file_reader::read_file(".skynet.env")
+          .expect("failed to read env vars");
+
+    log::debug!("skynet vars: {:#?}", &env_variables);
+
+    let portal_url = env_variables
+        .remove("SKYNET_PORTAL_URL")
+        .unwrap_or(DEFAULT_PORTAL_URL.to_string());
+
+    log::debug!("using Skynet portal: {}", &portal_url);
+
+    Self::new(portal_url.as_str(), SkynetClientOptions {
+      api_key: env_variables.remove("SKYNET_API_KEY"),
+      custom_user_agent: None,
+    })
+  }
+
   pub fn get_portal_url(&self) -> &str {
     self.portal_url.as_str()
   }
