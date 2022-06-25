@@ -166,8 +166,7 @@ pub fn download_file_stream<P: AsRef<Path>>(
         let mut cont = true;
 
         while let Some(item) = stream.next().await {
-            // todo: do not replace original error
-            let chunk = item.or(Err(CustomError(format!("Error while downloading file")))).unwrap();
+            let chunk = item.unwrap();
 
             file
                 .write_all(&chunk)
