@@ -112,13 +112,12 @@ pub fn download_file_stream<P: AsRef<Path>>(
   skylink: &str,
   opt: DownloadOptions,
 ) -> impl Stream<Item = SkynetResult<BytesDownloaded>> {
+  // todo: create util fn for this
   let skylink = if skylink.starts_with(URI_SKYNET_PREFIX) {
     &skylink[URI_SKYNET_PREFIX.len()..]
   } else {
     skylink
   };
-
-  // log::debug!("skylink to download stream: {}", skylink);
 
   let uri = make_uri(
     client.get_portal_url(),
@@ -127,10 +126,15 @@ pub fn download_file_stream<P: AsRef<Path>>(
     Some(skylink.to_string()),
     Default::default()); // todo: query
 
-  // log::debug!("URI to download stream: {}", uri.to_string());
-
   // todo: create Client:: or util:: function for this
-  let api_key = opt.api_key.or(client.get_options().api_key.clone()).unwrap_or_default();
+  let api_key = opt
+      .api_key
+      .or(client
+          .get_options()
+          .api_key
+          .clone()
+      )
+      .unwrap_or_default();
 
   // https://gist.github.com/giuliano-oliveira/4d11d6b3bb003dba3a1b53f43d81b30d
   async_stream::stream! {
@@ -142,47 +146,49 @@ pub fn download_file_stream<P: AsRef<Path>>(
         .header("Skynet-API-key", api_key)
         .send()
         .await
-        .map_err(ReqwestError);
+        .map_err(ReqwestError)?;
 
-    if res.is_err() {
-        yield res.map(|_| 0)
+    log!("received response object");
+
+    if !res.status().is_success() {
+      Err(CustomError(format!("server responded with status code {}", res.status())))?;
     }
 
-    else {
-        let res = res.unwrap();
+    let total_size = res
+        .content_length()
+        .ok_or(CustomError(format!("Failed to get content length from '{}'", &uri)))?;
 
-        let total_size = res
-            .content_length()
-            .ok_or(CustomError(format!("Failed to get content length from '{}'", &uri)))
-            .unwrap();
+    // download chunks
+    let mut file = fs::File::create(&path)
+        .map_err(FileError)?;
 
-        // download chunks
-        let mut file = fs::File::create(&path)
-            .map_err(FileError)
-            .unwrap();
+    log!("opened output file for writing: {}", &path.as_ref().display());
 
-        let mut downloaded: u64 = 0;
-        let mut stream = res.bytes_stream();
-        let mut cont = true;
+    let mut downloaded: u64 = 0;
+    let mut stream = res.bytes_stream();
 
-        while let Some(item) = stream.next().await {
-            let chunk = item.unwrap();
+    while let Some(item) = stream.next().await {
+      log!("received chunk from stream");
 
-            file
-                .write_all(&chunk)
-                .map_err(FileError)
-                .unwrap();
+      let chunk = item.unwrap();
 
-            let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
-            let since_last = new - downloaded;
+      log!("unpacked chunk");
 
-            downloaded = new;
+      file
+          .write_all(&chunk)
+          .map_err(FileError)?;
 
-            yield Ok(downloaded)
-        }
+      log!("wrote chunk");
 
-        // todo: yield error if expected file size doesnt match?
+      let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
+      let since_last = new - downloaded;
+
+      downloaded = new;
+
+      yield Ok(downloaded)
     }
+
+    // todo: yield error if expected file size doesnt match?
   }
 }
 
@@ -304,7 +310,7 @@ mod tests {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
     let res = download_data(&client, skylink, DownloadOptions::default()).await;
-    println!("{:?}", res);
+    log!("{:?}", res);
     assert!(res.is_ok());
     let data = res.unwrap();
     assert_eq!(str::from_utf8(&data).unwrap(), "hello world");
@@ -315,7 +321,7 @@ mod tests {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
     let res = download_file(&client, "tmp2.txt", skylink, DownloadOptions::default()).await;
-    println!("{:?}", res);
+    log!("{:?}", res);
     assert!(res.is_ok());
     assert_eq!(fs::read_to_string("tmp2.txt").unwrap(), "hello world");
     fs::remove_file("tmp2.txt").unwrap();
@@ -342,19 +348,50 @@ mod tests {
   #[tokio::test]
   async fn test_download_file_stream_auth() {
     let client = SkynetClient::new_from_env();
+
+    assert_eq!(client.get_portal_url(), "https://skynetfree.net");
+    assert!(client.get_options().api_key.is_some());
+
     let skylink = "AABC5fIelZsChCGs-fSBRVc5n2BoHc-LAmehPlPRBjIV9w";
     let mut output_event_stream = download_file_stream(&client, "/tmp/tmp2.txt", skylink, DownloadOptions::default());
 
     futures_util::pin_mut!(output_event_stream);
 
+    let mut bytes_downloaded = 0;
+
     while let Some(output_event) = output_event_stream.next().await.transpose().expect("stream error") {
       dbg!(&output_event);
+      bytes_downloaded = output_event;
     }
 
-    // todo check file size
-    // assert_eq!();
-
     fs::remove_file("/tmp/tmp2.txt").unwrap();
+
+    assert_eq!(bytes_downloaded, 11_878_400);
+  }
+
+  #[tokio::test]
+  async fn test_download_file_stream_headers() {
+    let client = SkynetClient::new_from_env();
+
+    let api_key = client
+        .get_options()
+        .api_key
+        .clone()
+        .expect("api key should be on client");
+
+    assert_eq!(client.get_portal_url(), "https://skynetfree.net");
+    assert!(client.get_options().api_key.is_some());
+
+    let skylink = "AABC5fIelZsChCGs-fSBRVc5n2BoHc-LAmehPlPRBjIV9w";
+
+    let res = reqwest::Client::new()
+        .get(format!("https://skynetfree.net/{}", skylink))
+        .header("Skynet-API-key", api_key)
+        .send()
+        .await
+        .map_err(ReqwestError);
+
+    assert!(res.is_ok());
   }
 
   #[tokio::test]
@@ -362,7 +399,7 @@ mod tests {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
     let res = get_metadata(&client, skylink, MetadataOptions::default()).await;
-    println!("{:?}", res);
+    log!("{:?}", res);
     assert!(res.is_ok());
 
     let metadata = res.unwrap();
