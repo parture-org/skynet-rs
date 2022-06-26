@@ -148,7 +148,7 @@ pub fn download_file_stream<P: AsRef<Path>>(
         .await
         .map_err(ReqwestError)?;
 
-    log!("received response object");
+    log::debug!("received response object");
 
     if !res.status().is_success() {
       Err(CustomError(format!("server responded with status code {}", res.status())))?;
@@ -162,23 +162,23 @@ pub fn download_file_stream<P: AsRef<Path>>(
     let mut file = fs::File::create(&path)
         .map_err(FileError)?;
 
-    log!("opened output file for writing: {}", &path.as_ref().display());
+    log::debug!("opened output file for writing: {}", &path.as_ref().display());
 
     let mut downloaded: u64 = 0;
     let mut stream = res.bytes_stream();
 
     while let Some(item) = stream.next().await {
-      log!("received chunk from stream");
+      log::debug!("received chunk from stream");
 
       let chunk = item.unwrap();
 
-      log!("unpacked chunk");
+      log::debug!("unpacked chunk");
 
       file
           .write_all(&chunk)
           .map_err(FileError)?;
 
-      log!("wrote chunk");
+      log::debug!("wrote chunk");
 
       let new = std::cmp::min(downloaded + (chunk.len() as u64), total_size);
       let since_last = new - downloaded;
@@ -310,7 +310,7 @@ mod tests {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
     let res = download_data(&client, skylink, DownloadOptions::default()).await;
-    log!("{:?}", res);
+    println!("{:?}", res);
     assert!(res.is_ok());
     let data = res.unwrap();
     assert_eq!(str::from_utf8(&data).unwrap(), "hello world");
@@ -321,7 +321,7 @@ mod tests {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
     let res = download_file(&client, "tmp2.txt", skylink, DownloadOptions::default()).await;
-    log!("{:?}", res);
+    println!("{:?}", res);
     assert!(res.is_ok());
     assert_eq!(fs::read_to_string("tmp2.txt").unwrap(), "hello world");
     fs::remove_file("tmp2.txt").unwrap();
@@ -399,7 +399,7 @@ mod tests {
     let client = SkynetClient::default();
     let skylink = "sia://AACi1FJOFAoRyl2YJyVz1yzsYrOfz18yXgnnbxNM0_UDng";
     let res = get_metadata(&client, skylink, MetadataOptions::default()).await;
-    log!("{:?}", res);
+    println!("{:?}", res);
     assert!(res.is_ok());
 
     let metadata = res.unwrap();
